@@ -1,0 +1,194 @@
+---
+title: "Prediction Assignment Writeup"
+output: html_document
+date: "2025-11-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(caret)
+library(dplyr)
+library(ggplot2)
+set.seed(12345)
+```
+
+## Introduction
+
+The goal of this project is to predict the manner in which participants performed an exercise, using accelerometer data from wearable devices.
+
+The outcome of interest is the variable classe in the training dataset. The five levels of classe represent different ways in which the exercise was performed (correctly or with various types of mistakes).
+
+We will:
+
+-   Load and clean the data
+
+-   Split the training data into a training and validation set
+
+-   Train several models, focusing on a Random Forest classifier
+
+-   Use cross-validation to estimate out-of-sample performance
+
+-   Select a final model and use it to predict the 20 cases in the test set
+
+
+
+## Data loading
+
+```{r raw data, echo=FALSE}
+training_raw <- read.csv("~/Desktop/Coursera/pml-training.csv")
+testing_raw <- read.csv("~/Desktop/Coursera/pml-testing.csv")
+
+dim(training_raw)
+dim(testing_raw)
+```
+
+We see that the training data have many predictors (hundreds of columns), including timestamps and metadata. Many of these variables are either mostly missing or irrelevant for prediction, so we need to perform some cleaning.
+
+## Data cleaning and preprocessing
+
+### Remove variables with many missing values
+We will first remove predictors that consist of mostly NA.
+```{r cleaning and process}
+# Set to NA for blanks and meaningless data
+training_raw[training_raw == ""] <- NA
+training_raw[training_raw == " "] <- NA
+training_raw[training_raw == "#DIV/0!"] <- NA
+
+testing_raw[testing_raw == ""] <- NA
+testing_raw[testing_raw == " "] <- NA
+testing_raw[testing_raw == "#DIV/0!"] <- NA
+
+noNA_cols <- colSums(is.na(training_raw)) == 0
+
+# Only keep the columns with no NAs
+training_clean <- training_raw[, noNA_cols]
+testing_clean  <- testing_raw[, noNA_cols]
+```
+
+### Remove non-meaningful predictors
+Next, we will remove predictors which are not meaningful for predictions. These include row index, user name, and raw timestamps.
+
+```{r remove meaningless predictors}
+id_vars <- c("X","user_name","raw_timestamp_part_1",
+             "raw_timestamp_part_2","cvtd_timestamp")
+
+training_clean <- training_clean[, !(names(training_clean) %in% id_vars)]
+testing_clean  <- testing_clean[,  !(names(testing_clean) %in% id_vars)]
+```
+
+### Remove near-zero variance predictors
+We will then remove predictors with non-zero variance i.e. same values for nearly all observations. Such predictors do not contribute to model accuracy and can slow down training or cause overfitting, so eliminating them improves model performance and stability.
+
+```{r remove non-variance}
+nzv <- nearZeroVar(training_clean, saveMetrics = TRUE)
+
+training_clean <- training_clean[, !nzv$nzv]
+testing_clean  <- testing_clean[,  !nzv$nzv]
+```
+
+## Training/Validation Split
+While here is a separate test file (pml-testing.csv), we still need an internal validation set from the training data to estimate out-of-sample performance.
+
+```{r training validation}
+set.seed(12345)
+inTrain <- createDataPartition(training_clean$classe, p = 0.7, list = FALSE)
+train_set <- training_clean[inTrain, ]
+valid_set <- training_clean[-inTrain, ]
+
+dim(train_set)
+dim(valid_set)
+
+train_set$classe <- factor(train_set$classe)
+valid_set$classe <- factor(valid_set$classe)
+```
+
+## Model Training
+We will use a Random Forest model, which tends to have better perfoamnce on high-dimensional classification tasks. We will use 5-fold cross-validation within the training set to tune the model and estimate model performance.
+
+```{r model training}
+ctrl <- trainControl(
+method = "cv",
+number = 5,
+verboseIter = FALSE
+)
+
+set.seed(12345)
+fit_rf <- train(
+classe ~ .,
+data = train_set,
+method = "rf",
+trControl = ctrl
+)
+
+fit_rf
+plot(fit_rf)
+
+```
+
+The output reports cross-validated accuracy for different values of mtry and selects the value that yields the highest accuracy. In my run, the best model used mtry = r fit_rf$bestTune$mtry`, with cross-validated accuracy around:
+```{r max accuracy}
+max(fit_rf$results$Accuracy)
+```
+
+This shows that the random forest model fits the training data very well under cross-validation.
+
+## Model Evaluation
+To estimate the out-of-sample performance, we evaluate the fitted model on the held-out validation set.
+
+```{r model evaluation}
+pred_valid <- predict(fit_rf, valid_set)
+cm_rf <- confusionMatrix(pred_valid, valid_set$classe)
+cm_rf
+cm_rf$overall["Accuracy"]
+```
+
+Using a Random Forest model with 5-fold cross-validation and tuned mtry, the model achieved an accuracy of 99.92% on the validation set (95% CI: 99.80%–99.97%), with a Kappa of 0.9989. Misclassification was extremely rare across all five classes, suggesting that the model generalizes very well to unseen data. The estimated out-of-sample error is therefore approximately 0.08%.
+
+## Validation Accuracy and Estimated Out-of-Sample Error
+
+```{r validation-metrics}
+# Overall accuracy from the confusion matrix
+valid_accuracy <- as.numeric(cm_rf$overall["Accuracy"])
+valid_accuracy
+
+# Estimated out-of-sample error
+oos_error <- 1 - valid_accuracy
+oos_error
+```
+
+The random forest model achieved a validation accuracy of 0.9991504, corresponding to an estimated out-of-sample error of approximately 0.0008496177.
+
+## 7. Final Model Fit on Full Training Data
+
+Since the random forest model performed extremely well on the validation set, we now
+refit the model on the entire cleaned training dataset to maximize the data used
+for learning. We reuse the best tuning parameter (`mtry`) found earlier.
+
+```{r final-model}
+# Use the best mtry from the cross-validated model
+best_mtry <- fit_rf$bestTune$mtry
+best_mtry
+
+ctrl_final <- trainControl(method = "none")
+
+set.seed(12345)
+fit_rf_final <- train(
+  classe ~ .,
+  data = training_clean,
+  method = "rf",
+  trControl = ctrl_final,
+  tuneGrid = data.frame(mtry = best_mtry)
+)
+
+fit_rf_final
+```
+
+## Predictions for the 20 Test Cases
+
+Finally the final random forest model is applied to the test set (`testing_clean`) to
+obtain predictions for the 20 cases required.
+
+```{r final-predictions}
+final_predictions <- predict(fit_rf_final, testing_clean)
+final_predictions
+```
