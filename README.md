@@ -6,7 +6,8 @@ This repository contains my submission for the **Practical Machine Learning** co
 ---
 
 ## Project Files
-- `Prediction Assignment Writeup.Rmd` — main analysis  
+- `Prediction Assignment Writeup.Rmd` — main analysis
+- `Prediction Assignment Writeup.html` - html file
 
 ## Data
 
