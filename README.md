@@ -6,7 +6,7 @@ This repository contains my submission for the **Practical Machine Learning** co
 ---
 
 ## Project Files
-- `pml_project.Rmd` — main analysis  
+- `Prediction Assignment Writeup.Rmd` — main analysis  
 
 ## Data
 
@@ -29,7 +29,7 @@ The model achieved **very high accuracy** on the validation set
 
 ## How to Knit
 
-Open `pml_project.Rmd` in RStudio and click:
+Open `Prediction Assignment Writeup.Rmd` in RStudio and click:
 
 **Knit → Knit to HTML**
 
